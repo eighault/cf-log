@@ -1,0 +1,264 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  sourceAccountId:
+    Type: Number
+Metadata:
+  'AWS::CloudFormation::Designer':
+    a539e2b3-02b4-4351-ba33-9762e6f66447:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 150
+        'y': 270
+      z: 1
+      embeds: []
+    b69d3d4e-3b3c-4fef-8765-72a5a8fe2c62:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 210
+        'y': 60
+      z: 1
+      embeds: []
+    24eafc91-536a-4bcc-a6d7-fef0a9923202:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 480
+        'y': 90
+      z: 1
+      embeds: []
+      dependson:
+        - a539e2b3-02b4-4351-ba33-9762e6f66447
+        - b69d3d4e-3b3c-4fef-8765-72a5a8fe2c62
+        - d062ac3a-ac8a-4ab5-8ef2-95c0a5921686
+        - 46d9b5e6-d45d-4570-b7ec-f50622a55e99
+    fbf63c12-a1d0-4b65-b18b-bc92c22da166:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 60
+        'y': 120
+      z: 1
+      embeds: []
+      isassociatedwith:
+        - 24eafc91-536a-4bcc-a6d7-fef0a9923202
+    ea39f87d-8992-4384-aca1-abde6bbc7b70:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 300
+        'y': 90
+      z: 1
+      embeds: []
+    bc73fbd6-49d2-4e3e-953c-3a7367958887:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 390
+        'y': 90
+      z: 1
+      embeds: []
+    796ba412-9eb4-411a-a084-7e633a0e13b5:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 70
+        'y': -20
+      z: 1
+      embeds: []
+      isassociatedwith:
+        - bc73fbd6-49d2-4e3e-953c-3a7367958887
+    d0705f7e-1043-4955-bede-a36d897f8270:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 310
+        'y': 180
+      z: 1
+      embeds: []
+      dependson:
+        - 796ba412-9eb4-411a-a084-7e633a0e13b5
+Resources:
+  role:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !Join 
+                  - .
+                  - - logs
+                    - !Ref 'AWS::Region'
+                    - amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 24eafc91-536a-4bcc-a6d7-fef0a9923202
+    DependsOn:
+      - stream
+      - bucket
+  stream:
+    Type: 'AWS::Kinesis::Stream'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: a539e2b3-02b4-4351-ba33-9762e6f66447
+    Properties:
+      Name: Logger
+      RetentionPeriodHours: 24
+      ShardCount: 1
+  bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: b69d3d4e-3b3c-4fef-8765-72a5a8fe2c62
+  policy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: writekinesis
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: 'kinesis:PutRecord'
+            Resource: !GetAtt 
+              - stream
+              - Arn
+          - Effect: Allow
+            Action: 'iam:PassRole'
+            Resource: !GetAtt 
+              - role
+              - Arn
+      Roles:
+        - !Ref role
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: fbf63c12-a1d0-4b65-b18b-bc92c22da166
+  destination:
+    Type: 'AWS::Logs::Destination'
+    Properties:
+      DestinationName: logs
+      RoleArn: !GetAtt 
+        - role
+        - Arn
+      TargetArn: !GetAtt 
+        - stream
+        - Arn
+      DestinationPolicy: !Sub 
+        - |
+          {
+            "Version" : "2012-10-17",
+            "Statement" : [
+              {
+                "Sid" : "",
+                "Effect" : "Allow",
+                "Principal" : {
+                  "AWS" : "${ACCOUNT}"
+                },
+                "Action" : "logs:PutSubscriptionFilter",
+                "Resource" : "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:destination:logs"
+              }
+            ]
+          }
+        - ACCOUNT: !Ref sourceAccountId
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: ea39f87d-8992-4384-aca1-abde6bbc7b70
+  deliverystream:
+    DependsOn:
+      - deliveryPolicy
+    Type: 'AWS::KinesisFirehose::DeliveryStream'
+    Properties:
+      DeliveryStreamType: KinesisStreamAsSource
+      KinesisStreamSourceConfiguration:
+        KinesisStreamARN: !GetAtt stream.Arn
+        RoleARN: !GetAtt deliveryRole.Arn
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !Join 
+          - ''
+          - - 'arn:aws:s3:::'
+            - !Ref bucket
+        BufferingHints:
+          IntervalInSeconds: '60'
+          SizeInMBs: '50'
+        CompressionFormat: GZIP
+        Prefix: raw/
+        RoleARN: !GetAtt deliveryRole.Arn
+        ProcessingConfiguration:
+          Enabled: 'false'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: d0705f7e-1043-4955-bede-a36d897f8270
+  deliveryRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref 'AWS::AccountId'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: bc73fbd6-49d2-4e3e-953c-3a7367958887
+  deliveryPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: firehose_delivery_policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:AbortMultipartUpload'
+              - 's3:GetBucketLocation'
+              - 's3:GetObject'
+              - 's3:ListBucket'
+              - 's3:ListBucketMultipartUploads'
+              - 's3:PutObject'
+            Resource:
+              - !Join 
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref bucket
+              - !Join 
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref bucket
+                  - '*'
+          - Effect: Allow
+            Action:
+              - 'kinesis:DescribeStream'
+              - 'kinesis:GetShardIterator'
+              - 'kinesis:GetRecords'
+            Resource:
+              - !GetAtt stream.Arn
+      Roles:
+        - !Ref deliveryRole
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 796ba412-9eb4-411a-a084-7e633a0e13b5
+
